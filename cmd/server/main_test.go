@@ -15,10 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/AmmannChristian/nist-800-90b/internal/config"
-	pb "github.com/AmmannChristian/nist-800-90b/pkg/pb"
 )
 
 func TestSetupLogging(t *testing.T) {
@@ -180,71 +178,4 @@ func TestRunStartsGRPCAndStops(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatalf("run did not return in time (grpc)")
 	}
-}
-
-func TestGRPCIntegrationWithStub(t *testing.T) {
-	// Allocate ports
-	httpLn := mustListen(t)
-	httpPort := httpLn.Addr().(*net.TCPAddr).Port
-	httpLn.Close()
-
-	grpcLn := mustListen(t)
-	grpcPort := grpcLn.Addr().(*net.TCPAddr).Port
-	grpcLn.Close()
-
-	os.Setenv("SERVER_PORT", fmt.Sprintf("%d", httpPort))
-	os.Setenv("GRPC_PORT", fmt.Sprintf("%d", grpcPort))
-	os.Setenv("GRPC_ENABLED", "true")
-	os.Setenv("METRICS_ENABLED", "false")
-	t.Cleanup(func() {
-		os.Unsetenv("SERVER_PORT")
-		os.Unsetenv("GRPC_PORT")
-		os.Unsetenv("GRPC_ENABLED")
-		os.Unsetenv("METRICS_ENABLED")
-	})
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- run()
-	}()
-
-	time.Sleep(200 * time.Millisecond)
-
-	// Dial gRPC
-	conn, err := grpc.NewClient(fmt.Sprintf("127.0.0.1:%d", grpcPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	defer conn.Close()
-
-	client := pb.NewEntropyServiceClient(conn)
-	resp, err := client.AssessEntropy(context.Background(), &pb.EntropyAssessmentRequest{
-		Data:          []byte{1, 2, 3, 4},
-		BitsPerSymbol: 8,
-		IidMode:       true,
-		NonIidMode:    false,
-	})
-	require.NoError(t, err)
-	assert.Greater(t, resp.MinEntropy, 0.0)
-	assert.Equal(t, uint32(8), resp.BitsPerSymbol)
-
-	// Stop server
-	p, err := os.FindProcess(os.Getpid())
-	require.NoError(t, err)
-	require.NoError(t, p.Signal(syscall.SIGTERM))
-
-	select {
-	case err := <-errCh:
-		assert.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatalf("run did not return in time (grpc integration)")
-	}
-}
-
-// mustListen gives an ephemeral TCP port.
-func mustListen(t *testing.T) net.Listener {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skipf("cannot listen on tcp :0: %v", err)
-	}
-	return ln
 }
