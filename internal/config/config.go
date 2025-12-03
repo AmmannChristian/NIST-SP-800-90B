@@ -26,6 +26,12 @@ type Config struct {
 
 	// Metrics
 	MetricsEnabled bool
+
+	// Authentication
+	AuthEnabled  bool
+	AuthIssuer   string
+	AuthAudience string
+	AuthJWKSURL  string
 }
 
 // LoadConfig loads configuration from environment variables with defaults
@@ -40,6 +46,10 @@ func LoadConfig() (*Config, error) {
 		MaxUploadSize:  getEnvAsInt64("MAX_UPLOAD_SIZE", 100*1024*1024), // 100MB default
 		Timeout:        getEnvAsDuration("TIMEOUT", 5*time.Minute),
 		MetricsEnabled: getEnvAsBool("METRICS_ENABLED", true),
+		AuthEnabled:    getEnvAsBool("AUTH_ENABLED", false),
+		AuthIssuer:     getEnv("AUTH_ISSUER", ""),
+		AuthAudience:   getEnv("AUTH_AUDIENCE", ""),
+		AuthJWKSURL:    getEnv("AUTH_JWKS_URL", ""),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -71,6 +81,18 @@ func (c *Config) Validate() error {
 	}
 	if !validLogLevels[c.LogLevel] {
 		return fmt.Errorf("invalid log level: %s (must be debug, info, warn, or error)", c.LogLevel)
+	}
+
+	if c.AuthEnabled {
+		if !c.GRPCEnabled {
+			return fmt.Errorf("authentication requires gRPC to be enabled")
+		}
+		if c.AuthIssuer == "" {
+			return fmt.Errorf("invalid auth issuer: required when AUTH_ENABLED=true")
+		}
+		if c.AuthAudience == "" {
+			return fmt.Errorf("invalid auth audience: required when AUTH_ENABLED=true")
+		}
 	}
 
 	return nil

@@ -24,6 +24,10 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, int64(100*1024*1024), cfg.MaxUploadSize)
 	assert.Equal(t, 5*time.Minute, cfg.Timeout)
 	assert.True(t, cfg.MetricsEnabled)
+	assert.False(t, cfg.AuthEnabled)
+	assert.Empty(t, cfg.AuthIssuer)
+	assert.Empty(t, cfg.AuthAudience)
+	assert.Empty(t, cfg.AuthJWKSURL)
 }
 
 func TestLoadConfig_EnvironmentVariables(t *testing.T) {
@@ -37,6 +41,10 @@ func TestLoadConfig_EnvironmentVariables(t *testing.T) {
 	os.Setenv("MAX_UPLOAD_SIZE", "52428800")
 	os.Setenv("TIMEOUT", "10m")
 	os.Setenv("METRICS_ENABLED", "false")
+	os.Setenv("AUTH_ENABLED", "true")
+	os.Setenv("AUTH_ISSUER", "https://issuer.example.com")
+	os.Setenv("AUTH_AUDIENCE", "nist-entropy")
+	os.Setenv("AUTH_JWKS_URL", "https://issuer.example.com/jwks.json")
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -49,6 +57,10 @@ func TestLoadConfig_EnvironmentVariables(t *testing.T) {
 	assert.Equal(t, int64(52428800), cfg.MaxUploadSize)
 	assert.Equal(t, 10*time.Minute, cfg.Timeout)
 	assert.False(t, cfg.MetricsEnabled)
+	assert.True(t, cfg.AuthEnabled)
+	assert.Equal(t, "https://issuer.example.com", cfg.AuthIssuer)
+	assert.Equal(t, "nist-entropy", cfg.AuthAudience)
+	assert.Equal(t, "https://issuer.example.com/jwks.json", cfg.AuthJWKSURL)
 }
 
 func TestConfig_Validate(t *testing.T) {
@@ -124,6 +136,49 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "invalid log level",
 		},
+		{
+			name: "auth enabled but grpc disabled",
+			cfg: &Config{
+				ServerPort:    8080,
+				GRPCEnabled:   false,
+				GRPCPort:      9090,
+				MaxUploadSize: 1024,
+				LogLevel:      "info",
+				AuthEnabled:   true,
+				AuthIssuer:    "issuer",
+				AuthAudience:  "aud",
+			},
+			wantErr: true,
+			errMsg:  "authentication requires gRPC to be enabled",
+		},
+		{
+			name: "auth enabled missing issuer",
+			cfg: &Config{
+				ServerPort:    8080,
+				GRPCEnabled:   true,
+				GRPCPort:      9090,
+				MaxUploadSize: 1024,
+				LogLevel:      "info",
+				AuthEnabled:   true,
+				AuthAudience:  "aud",
+			},
+			wantErr: true,
+			errMsg:  "auth issuer",
+		},
+		{
+			name: "auth enabled missing audience",
+			cfg: &Config{
+				ServerPort:    8080,
+				GRPCEnabled:   true,
+				GRPCPort:      9090,
+				MaxUploadSize: 1024,
+				LogLevel:      "info",
+				AuthEnabled:   true,
+				AuthIssuer:    "issuer",
+			},
+			wantErr: true,
+			errMsg:  "auth audience",
+		},
 	}
 
 	for _, tt := range tests {
@@ -188,6 +243,7 @@ func clearEnv(t *testing.T) {
 	envVars := []string{
 		"SERVER_PORT", "SERVER_HOST", "GRPC_ENABLED", "GRPC_PORT",
 		"LOG_LEVEL", "MAX_UPLOAD_SIZE", "TIMEOUT", "METRICS_ENABLED",
+		"AUTH_ENABLED", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_JWKS_URL",
 	}
 	for _, v := range envVars {
 		os.Unsetenv(v)

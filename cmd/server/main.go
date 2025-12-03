@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AmmannChristian/go-authx/grpcserver"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -53,6 +54,7 @@ func run() error {
 		Int("http_port", cfg.ServerPort).
 		Int("grpc_port", cfg.GRPCPort).
 		Bool("grpc_enabled", cfg.GRPCEnabled).
+		Bool("auth_enabled", cfg.AuthEnabled).
 		Int64("max_upload_bytes", cfg.MaxUploadSize).
 		Msg("starting SP800-90B entropy assessment server")
 
@@ -74,11 +76,13 @@ func run() error {
 			return fmt.Errorf("failed to create gRPC listener: %w", err)
 		}
 
+		unaryInterceptors, err := buildUnaryInterceptors(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to configure gRPC server: %w", err)
+		}
+
 		grpcServer = grpc.NewServer(
-			grpc.ChainUnaryInterceptor(
-				middleware.UnaryRequestIDInterceptor(),
-				loggingInterceptor,
-			),
+			grpc.ChainUnaryInterceptor(unaryInterceptors...),
 		)
 
 		pb.RegisterEntropyServiceServer(grpcServer, service.NewGRPCServer(service.NewService()))
@@ -145,6 +149,35 @@ func run() error {
 	}
 
 	return nil
+}
+
+func buildUnaryInterceptors(cfg *config.Config) ([]grpc.UnaryServerInterceptor, error) {
+	interceptors := []grpc.UnaryServerInterceptor{
+		middleware.UnaryRequestIDInterceptor(),
+		loggingInterceptor,
+	}
+
+	if !cfg.AuthEnabled {
+		return interceptors, nil
+	}
+
+	validatorBuilder := grpcserver.NewValidatorBuilder(cfg.AuthIssuer, cfg.AuthAudience)
+	if cfg.AuthJWKSURL != "" {
+		validatorBuilder = validatorBuilder.WithJWKSURL(cfg.AuthJWKSURL)
+	}
+
+	validator, err := validatorBuilder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build auth validator: %w", err)
+	}
+
+	log.Info().
+		Str("issuer", cfg.AuthIssuer).
+		Str("audience", cfg.AuthAudience).
+		Str("jwks_url", cfg.AuthJWKSURL).
+		Msg("gRPC authentication enabled")
+
+	return append(interceptors, grpcserver.UnaryServerInterceptor(validator)), nil
 }
 
 func (s *server) registerRoutes() {

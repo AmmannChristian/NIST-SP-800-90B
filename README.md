@@ -45,6 +45,16 @@ make build
 SERVER_PORT=8080 GRPC_ENABLED=true GRPC_PORT=50051 ./build/server
 ```
 
+### Configuration
+
+Key environment variables:
+- `SERVER_PORT` / `SERVER_HOST` - HTTP metrics/health bind address (default: `0.0.0.0:8080`)
+- `GRPC_ENABLED` / `GRPC_PORT` - Enable and bind the gRPC API
+- `AUTH_ENABLED` - Enable JWT validation for gRPC calls (default: false)
+- `AUTH_ISSUER` / `AUTH_AUDIENCE` - Expected issuer and audience (required when auth is enabled)
+- `AUTH_JWKS_URL` - Optional custom JWKS endpoint override
+- `MAX_UPLOAD_SIZE` / `TIMEOUT` / `LOG_LEVEL` - Upload limit, server timeouts, and logging level
+
 ## Usage
 
 ### CLI
