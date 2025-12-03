@@ -15,6 +15,16 @@ jobs:
       with:
         go-version: '1.25.4'
 
+    - name: Cache NIST reference repository and binaries
+      uses: actions/cache@v4
+      with:
+        path: |
+          build/90b-validation/ref
+          build/90b-validation/bin
+        key: nist-validation-${{ runner.os }}-${{ hashFiles('tools/run_90b_validation.sh') }}
+        restore-keys: |
+          nist-validation-${{ runner.os }}-
+
     - name: Install C++ Dependencies
       run: |
         sudo apt-get update

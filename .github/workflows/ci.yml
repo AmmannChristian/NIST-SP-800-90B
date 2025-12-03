@@ -22,8 +22,9 @@ env:
   UNIT_PKGS: ./internal/...
   GOCACHE: /tmp/go-build
   GOMODCACHE: /tmp/go-mod
-  GO_CACHE_VERSION: v1
+  GO_CACHE_VERSION: v2
   CGO_ENABLED: '1'
+  PROTOC_VERSION: '28.3'
 
 jobs:
   build_and_test:
@@ -52,12 +53,21 @@ jobs:
           restore-keys: |
             go-${{ env.GO_CACHE_VERSION }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-
 
+      - name: Cache protoc
+        id: cache-protoc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/protoc
+          key: protoc-${{ env.PROTOC_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
       - name: Install protoc
+        if: steps.cache-protoc.outputs.cache-hit != 'true'
         run: |
-          PROTOC_VERSION="28.3"
-          wget -q "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
-          unzip -q protoc-${PROTOC_VERSION}-linux-x86_64.zip -d "$HOME/protoc"
-          echo "$HOME/protoc/bin" >> "$GITHUB_PATH"
+          wget -q "https://github.com/protocolbuffers/protobuf/releases/download/v${{ env.PROTOC_VERSION }}/protoc-${{ env.PROTOC_VERSION }}-linux-x86_64.zip"
+          unzip -q protoc-${{ env.PROTOC_VERSION }}-linux-x86_64.zip -d "${{ runner.temp }}/protoc"
+
+      - name: Add protoc to PATH
+        run: echo "${{ runner.temp }}/protoc/bin" >> "$GITHUB_PATH"
 
       - name: Install C++ dependencies
         run: |
@@ -143,11 +153,13 @@ jobs:
           cp build/ea_tool build-ci/binaries/
           cp build/server build-ci/binaries/
 
-      - name: Build ARM64 binary
-        run: |
-          make build-arm64
-          cp build/ea_tool-arm64 build-ci/binaries/
-          cp build/server-arm64 build-ci/binaries/
+      # ARM64 build disabled: requires cross-compiler for CGO
+      # To enable: install gcc-aarch64-linux-gnu and set CC_FOR_TARGET
+      # - name: Build ARM64 binary
+      #   run: |
+      #     make build-arm64
+      #     cp build/ea_tool-arm64 build-ci/binaries/
+      #     cp build/server-arm64 build-ci/binaries/
 
       - name: List build artifacts
         run: |
@@ -204,7 +216,6 @@ jobs:
           echo "**Unit tests:** Passed" >> $GITHUB_STEP_SUMMARY
           echo "**Coverage threshold:** ≥90%" >> $GITHUB_STEP_SUMMARY
           echo "**Native binary:** Built" >> $GITHUB_STEP_SUMMARY
-          echo "**ARM64 binary:** Built" >> $GITHUB_STEP_SUMMARY
 
   race_tests:
     name: Race Tests
