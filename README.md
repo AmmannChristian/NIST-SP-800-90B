@@ -1,8 +1,11 @@
 # NIST SP 800-90B Entropy Assessment - gRPC Microservice
 
-![CI](https://github.com/AmmannChristian/nist-800-90b/actions/workflows/ci.yml/badge.svg)
-![NIST Validation](https://github.com/AmmannChristian/nist-800-90b/actions/workflows/nist-validation.yml/badge.svg)
-[![codecov](https://codecov.io/gh/AmmannChristian/nist-800-90b/branch/main/graph/badge.svg)](https://app.codecov.io/gh/AmmannChristian/nist-800-90b)
+![CI](https://github.com/AmmannChristian/NIST-SP-800-90B/actions/workflows/ci.yml/badge.svg)
+![NIST Validation](https://github.com/AmmannChristian/NIST-SP-800-90B/actions/workflows/nist-validation.yml/badge.svg)
+[![Go Report Card](https://goreportcard.com/badge/github.com/AmmannChristian/NIST-SP-800-90B)](https://goreportcard.com/report/github.com/AmmannChristian/NIST-SP-800-90B)
+[![License](https://img.shields.io/github/license/AmmannChristian/NIST-SP-800-90B)](LICENSE)
+[![codecov](https://codecov.io/gh/AmmannChristian/NIST-SP-800-90B/branch/main/graph/badge.svg)](https://app.codecov.io/gh/AmmannChristian/NIST-SP-800-90B)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/AmmannChristian/NIST-SP-800-90B)](go.mod)
 
 A high-performance Go service that wraps the NIST SP 800-90B entropy assessment C++ tools via CGO. Provides a gRPC API, CLI, and Prometheus metrics with deterministic builds and reproducible outputs.
 
