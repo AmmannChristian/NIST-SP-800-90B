@@ -20,6 +20,12 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, "0.0.0.0", cfg.ServerHost)
 	assert.False(t, cfg.GRPCEnabled)
 	assert.Equal(t, 9090, cfg.GRPCPort)
+	assert.False(t, cfg.TLSEnabled)
+	assert.Empty(t, cfg.TLSCertFile)
+	assert.Empty(t, cfg.TLSKeyFile)
+	assert.Empty(t, cfg.TLSCAFile)
+	assert.Equal(t, "none", cfg.TLSClientAuth)
+	assert.Equal(t, "1.2", cfg.TLSMinVersion)
 	assert.Equal(t, "info", cfg.LogLevel)
 	assert.Equal(t, int64(100*1024*1024), cfg.MaxUploadSize)
 	assert.Equal(t, 5*time.Minute, cfg.Timeout)
@@ -37,6 +43,12 @@ func TestLoadConfig_EnvironmentVariables(t *testing.T) {
 	os.Setenv("SERVER_HOST", "127.0.0.1")
 	os.Setenv("GRPC_ENABLED", "true")
 	os.Setenv("GRPC_PORT", "50051")
+	os.Setenv("TLS_ENABLED", "true")
+	os.Setenv("TLS_CERT_FILE", "/tmp/server.crt")
+	os.Setenv("TLS_KEY_FILE", "/tmp/server.key")
+	os.Setenv("TLS_CA_FILE", "/tmp/ca.crt")
+	os.Setenv("TLS_CLIENT_AUTH", "requireandverify")
+	os.Setenv("TLS_MIN_VERSION", "1.3")
 	os.Setenv("LOG_LEVEL", "debug")
 	os.Setenv("MAX_UPLOAD_SIZE", "52428800")
 	os.Setenv("TIMEOUT", "10m")
@@ -53,6 +65,12 @@ func TestLoadConfig_EnvironmentVariables(t *testing.T) {
 	assert.Equal(t, "127.0.0.1", cfg.ServerHost)
 	assert.True(t, cfg.GRPCEnabled)
 	assert.Equal(t, 50051, cfg.GRPCPort)
+	assert.True(t, cfg.TLSEnabled)
+	assert.Equal(t, "/tmp/server.crt", cfg.TLSCertFile)
+	assert.Equal(t, "/tmp/server.key", cfg.TLSKeyFile)
+	assert.Equal(t, "/tmp/ca.crt", cfg.TLSCAFile)
+	assert.Equal(t, "requireandverify", cfg.TLSClientAuth)
+	assert.Equal(t, "1.3", cfg.TLSMinVersion)
 	assert.Equal(t, "debug", cfg.LogLevel)
 	assert.Equal(t, int64(52428800), cfg.MaxUploadSize)
 	assert.Equal(t, 10*time.Minute, cfg.Timeout)
@@ -179,6 +197,81 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "auth audience",
 		},
+		{
+			name: "tls enabled without grpc",
+			cfg: &Config{
+				ServerPort:    8080,
+				GRPCEnabled:   false,
+				GRPCPort:      9090,
+				LogLevel:      "info",
+				MaxUploadSize: 1024,
+				TLSEnabled:    true,
+				TLSCertFile:   "/tmp/cert.pem",
+				TLSKeyFile:    "/tmp/key.pem",
+			},
+			wantErr: true,
+			errMsg:  "TLS requires gRPC",
+		},
+		{
+			name: "tls enabled missing cert",
+			cfg: &Config{
+				ServerPort:    8080,
+				GRPCEnabled:   true,
+				GRPCPort:      9090,
+				LogLevel:      "info",
+				MaxUploadSize: 1024,
+				TLSEnabled:    true,
+				TLSKeyFile:    "/tmp/key.pem",
+			},
+			wantErr: true,
+			errMsg:  "TLS_CERT_FILE",
+		},
+		{
+			name: "tls enabled missing key",
+			cfg: &Config{
+				ServerPort:    8080,
+				GRPCEnabled:   true,
+				GRPCPort:      9090,
+				LogLevel:      "info",
+				MaxUploadSize: 1024,
+				TLSEnabled:    true,
+				TLSCertFile:   "/tmp/cert.pem",
+			},
+			wantErr: true,
+			errMsg:  "TLS_KEY_FILE",
+		},
+		{
+			name: "tls enabled invalid client auth",
+			cfg: &Config{
+				ServerPort:    8080,
+				GRPCEnabled:   true,
+				GRPCPort:      9090,
+				LogLevel:      "info",
+				MaxUploadSize: 1024,
+				TLSEnabled:    true,
+				TLSCertFile:   "/tmp/cert.pem",
+				TLSKeyFile:    "/tmp/key.pem",
+				TLSClientAuth: "broken",
+			},
+			wantErr: true,
+			errMsg:  "TLS_CLIENT_AUTH",
+		},
+		{
+			name: "tls enabled invalid min version",
+			cfg: &Config{
+				ServerPort:    8080,
+				GRPCEnabled:   true,
+				GRPCPort:      9090,
+				LogLevel:      "info",
+				MaxUploadSize: 1024,
+				TLSEnabled:    true,
+				TLSCertFile:   "/tmp/cert.pem",
+				TLSKeyFile:    "/tmp/key.pem",
+				TLSMinVersion: "1.1",
+			},
+			wantErr: true,
+			errMsg:  "TLS_MIN_VERSION",
+		},
 	}
 
 	for _, tt := range tests {
@@ -242,6 +335,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	envVars := []string{
 		"SERVER_PORT", "SERVER_HOST", "GRPC_ENABLED", "GRPC_PORT",
+		"TLS_ENABLED", "TLS_CERT_FILE", "TLS_KEY_FILE", "TLS_CA_FILE", "TLS_CLIENT_AUTH", "TLS_MIN_VERSION",
 		"LOG_LEVEL", "MAX_UPLOAD_SIZE", "TIMEOUT", "METRICS_ENABLED",
 		"AUTH_ENABLED", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_JWKS_URL",
 	}

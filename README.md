@@ -50,6 +50,11 @@ SERVER_PORT=8080 GRPC_ENABLED=true GRPC_PORT=50051 ./build/server
 Key environment variables:
 - `SERVER_PORT` / `SERVER_HOST` - HTTP metrics/health bind address (default: `0.0.0.0:8080`)
 - `GRPC_ENABLED` / `GRPC_PORT` - Enable and bind the gRPC API
+- `TLS_ENABLED` - Enable TLS for the gRPC server (default: false)
+- `TLS_CERT_FILE` / `TLS_KEY_FILE` - Server certificate and key (required when TLS is enabled)
+- `TLS_CA_FILE` - Optional CA bundle for client cert verification (mTLS)
+- `TLS_CLIENT_AUTH` - Client auth mode (`none`, `request`, `requireany`, `verifyifgiven`, `requireandverify`; default: `none`)
+- `TLS_MIN_VERSION` - Minimum TLS version (`1.2` or `1.3`; default: `1.2`)
 - `AUTH_ENABLED` - Enable JWT validation for gRPC calls (default: false)
 - `AUTH_ISSUER` / `AUTH_AUDIENCE` - Expected issuer and audience (required when auth is enabled)
 - `AUTH_JWKS_URL` - Optional custom JWKS endpoint override

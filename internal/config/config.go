@@ -1,9 +1,11 @@
 package config
 
 import (
+	"crypto/tls"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -14,6 +16,14 @@ type Config struct {
 	ServerHost  string
 	GRPCEnabled bool
 	GRPCPort    int
+
+	// TLS for gRPC
+	TLSEnabled    bool
+	TLSCertFile   string
+	TLSKeyFile    string
+	TLSCAFile     string
+	TLSClientAuth string
+	TLSMinVersion string
 
 	// Logging
 	LogLevel string
@@ -42,6 +52,12 @@ func LoadConfig() (*Config, error) {
 		ServerHost:     getEnv("SERVER_HOST", "0.0.0.0"),
 		GRPCEnabled:    getEnvAsBool("GRPC_ENABLED", false),
 		GRPCPort:       getEnvAsInt("GRPC_PORT", 9090),
+		TLSEnabled:     getEnvAsBool("TLS_ENABLED", false),
+		TLSCertFile:    getEnv("TLS_CERT_FILE", ""),
+		TLSKeyFile:     getEnv("TLS_KEY_FILE", ""),
+		TLSCAFile:      getEnv("TLS_CA_FILE", ""),
+		TLSClientAuth:  getEnv("TLS_CLIENT_AUTH", "none"),
+		TLSMinVersion:  getEnv("TLS_MIN_VERSION", "1.2"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
 		MaxUploadSize:  getEnvAsInt64("MAX_UPLOAD_SIZE", 100*1024*1024), // 100MB default
 		Timeout:        getEnvAsDuration("TIMEOUT", 5*time.Minute),
@@ -95,7 +111,35 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.TLSEnabled {
+		if !c.GRPCEnabled {
+			return fmt.Errorf("TLS requires gRPC to be enabled")
+		}
+		if c.TLSCertFile == "" {
+			return fmt.Errorf("invalid TLS_CERT_FILE: required when TLS_ENABLED=true")
+		}
+		if c.TLSKeyFile == "" {
+			return fmt.Errorf("invalid TLS_KEY_FILE: required when TLS_ENABLED=true")
+		}
+		if _, err := parseTLSClientAuth(c.TLSClientAuth); err != nil {
+			return err
+		}
+		if _, err := parseTLSMinVersion(c.TLSMinVersion); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// TLSClientAuthType returns the parsed tls.ClientAuthType from configuration.
+func (c *Config) TLSClientAuthType() (tls.ClientAuthType, error) {
+	return parseTLSClientAuth(c.TLSClientAuth)
+}
+
+// TLSMinVersionValue returns the configured minimum TLS version (defaults to TLS 1.2).
+func (c *Config) TLSMinVersionValue() (uint16, error) {
+	return parseTLSMinVersion(c.TLSMinVersion)
 }
 
 // Helper functions to read environment variables
@@ -117,6 +161,34 @@ func getEnvAsInt(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return value
+}
+
+func parseTLSClientAuth(mode string) (tls.ClientAuthType, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "none", "noclientcert":
+		return tls.NoClientCert, nil
+	case "request", "requestclientcert":
+		return tls.RequestClientCert, nil
+	case "requireany", "requireanyclientcert":
+		return tls.RequireAnyClientCert, nil
+	case "verifyifgiven", "verify_client_cert_if_given":
+		return tls.VerifyClientCertIfGiven, nil
+	case "requireandverify", "requireandverifyclientcert", "mtls":
+		return tls.RequireAndVerifyClientCert, nil
+	default:
+		return tls.NoClientCert, fmt.Errorf("invalid TLS_CLIENT_AUTH: %s", mode)
+	}
+}
+
+func parseTLSMinVersion(version string) (uint16, error) {
+	switch strings.ToLower(strings.TrimSpace(version)) {
+	case "", "default", "1.2", "tls1.2", "tls12":
+		return tls.VersionTLS12, nil
+	case "1.3", "tls1.3", "tls13":
+		return tls.VersionTLS13, nil
+	default:
+		return 0, fmt.Errorf("invalid TLS_MIN_VERSION: %s (use 1.2 or 1.3)", version)
+	}
 }
 
 func getEnvAsInt64(key string, defaultValue int64) int64 {

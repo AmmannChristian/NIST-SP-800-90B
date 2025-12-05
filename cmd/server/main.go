@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,9 +82,12 @@ func run() error {
 			return fmt.Errorf("failed to configure gRPC server: %w", err)
 		}
 
-		grpcServer = grpc.NewServer(
-			grpc.ChainUnaryInterceptor(unaryInterceptors...),
-		)
+		serverOpts, err := buildGRPCServerOptions(cfg, unaryInterceptors)
+		if err != nil {
+			return fmt.Errorf("failed to configure gRPC server: %w", err)
+		}
+
+		grpcServer = grpc.NewServer(serverOpts...)
 
 		pb.RegisterEntropyServiceServer(grpcServer, service.NewGRPCServer(service.NewService()))
 		reflection.Register(grpcServer)
@@ -178,6 +182,61 @@ func buildUnaryInterceptors(cfg *config.Config) ([]grpc.UnaryServerInterceptor, 
 		Msg("gRPC authentication enabled")
 
 	return append(interceptors, grpcserver.UnaryServerInterceptor(validator)), nil
+}
+
+func buildGRPCServerOptions(cfg *config.Config, unaryInterceptors []grpc.UnaryServerInterceptor) ([]grpc.ServerOption, error) {
+	opts := []grpc.ServerOption{
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
+	}
+
+	if !cfg.TLSEnabled {
+		return opts, nil
+	}
+
+	clientAuth, err := cfg.TLSClientAuthType()
+	if err != nil {
+		return nil, fmt.Errorf("invalid TLS client auth setting: %w", err)
+	}
+
+	minVersion, err := cfg.TLSMinVersionValue()
+	if err != nil {
+		return nil, fmt.Errorf("invalid TLS min version: %w", err)
+	}
+
+	tlsConfig := &grpcserver.TLSConfig{
+		CertFile:   cfg.TLSCertFile,
+		KeyFile:    cfg.TLSKeyFile,
+		CAFile:     cfg.TLSCAFile,
+		ClientAuth: clientAuth,
+		MinVersion: minVersion,
+	}
+
+	tlsOpt, err := grpcserver.ServerOption(tlsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to configure TLS: %w", err)
+	}
+
+	log.Info().
+		Bool("tls_enabled", true).
+		Str("cert_file", cfg.TLSCertFile).
+		Str("key_file", cfg.TLSKeyFile).
+		Str("ca_file", cfg.TLSCAFile).
+		Str("client_auth", cfg.TLSClientAuth).
+		Str("min_version", tlsVersionString(minVersion)).
+		Msg("gRPC TLS enabled")
+
+	return append(opts, tlsOpt), nil
+}
+
+func tlsVersionString(version uint16) string {
+	switch version {
+	case tls.VersionTLS13:
+		return "1.3"
+	case tls.VersionTLS12:
+		return "1.2"
+	default:
+		return fmt.Sprintf("0x%x", version)
+	}
 }
 
 func (s *server) registerRoutes() {
