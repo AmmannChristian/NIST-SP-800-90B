@@ -285,15 +285,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/sp800-90b-entropy
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest
+
       - name: Build and push image
-        env:
-          REGISTRY: ghcr.io
-          IMAGE_NAME: ${{ github.repository_owner }}/sp800-90b-entropy
-        run: |
-          set -euo pipefail
-          OWNER_IMAGE=$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
-          IMAGE="${REGISTRY}/${OWNER_IMAGE}"
-          echo "Building ${IMAGE}:{sha,latest}"
-          docker build -t "${IMAGE}:${GITHUB_SHA}" -t "${IMAGE}:latest" .
-          docker push "${IMAGE}:${GITHUB_SHA}"
-          docker push "${IMAGE}:latest"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
