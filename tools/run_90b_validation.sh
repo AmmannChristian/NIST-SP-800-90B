@@ -18,7 +18,7 @@ MIN_SAMPLES=1000000
 
 mkdir -p "${BUILD_DIR}" "${BIN_DIR}" "${SAMPLES_DIR}"
 
-log() { echo "[$(date +'%H:%M:%S')] $*"; }
+log() { echo "[$(date +'%H:%M:%S')] $*" >&2; }
 
 clone_ref_repo() {
   if [[ -d "${REF_DIR}/.git" ]]; then
@@ -107,16 +107,69 @@ except Exception:
 
 candidates=[]
 if isinstance(data, dict):
-    candidates.extend(extract_candidates(data))
+    # First, check if this is a NIST reference JSON with testCases
     tcs=data.get("testCases")
-    if isinstance(tcs, list):
+    if isinstance(tcs, list) and len(tcs) > 0:
+        # Look for the "Overall" test case which contains the final assessed entropy
+        overall_found = False
         for tc in tcs:
-            candidates.extend(extract_candidates(tc))
+            desc = tc.get("testCaseDesc", tc.get("testCaseNumber", ""))
+            if desc == "Overall":
+                candidates.extend(extract_candidates(tc))
+                overall_found = True
+                break
+        # If no Overall testCase found, fall back to all testCases (shouldn't happen)
+        if not overall_found:
+            for tc in tcs:
+                candidates.extend(extract_candidates(tc))
+    else:
+        # This is a Go/simple JSON format with top-level fields only
+        candidates.extend(extract_candidates(data))
 
 if candidates:
+    # For the assessed entropy, we want h_assessed primarily
+    # But the extract_candidates function already prioritizes it
     print(min(candidates))
 else:
     print("n/a")
+PY
+}
+
+# Compare two entropy values with floating-point tolerance
+# Returns 0 if values match within tolerance, 1 otherwise
+compare_entropy() {
+  python3 - "$1" "$2" <<'PY'
+import sys
+
+def is_close(a_str, b_str, abs_tol=1e-12):
+    """
+    Compare two numeric strings with floating-point tolerance.
+    Uses absolute tolerance for float64 numerical noise (~1e-14).
+    Returns True if values match within tolerance, False otherwise.
+    """
+    try:
+        a = float(a_str)
+        b = float(b_str)
+        # If values are identical or within absolute tolerance
+        if a == b or abs(a - b) <= abs_tol:
+            return True
+        # Also check relative tolerance for larger values
+        rel_tol = 1e-12
+        max_val = max(abs(a), abs(b))
+        if max_val > 0 and abs(a - b) / max_val <= rel_tol:
+            return True
+        return False
+    except (ValueError, TypeError):
+        # Fall back to string comparison for non-numeric values
+        return a_str == b_str
+
+a_val = sys.argv[1]
+b_val = sys.argv[2]
+
+if is_close(a_val, b_val):
+    sys.exit(0)  # Match
+else:
+    sys.exit(1)  # No match
 PY
 }
 
@@ -164,7 +217,7 @@ run_for_file() {
     go_non=$(parse_min_entropy "${BUILD_DIR}/go_non_iid_${base}.json" "${bits}")
   fi
 
-  printf "%-20s %-4s %-12s %-12s %-12s %-12s\n" "${base}" "${bits}" "${ref_iid}" "${go_iid}" "${ref_non}" "${go_non}"
+  echo "${ref_iid} ${go_iid} ${ref_non} ${go_non}"
 }
 
 main() {
@@ -172,17 +225,23 @@ main() {
   copy_samples
   ensure_go_binaries
 
-  printf "%s\n" "Dataset              Bits Ref_IID      Go_IID       Ref_NonIID   Go_NonIID"
-  printf "%s\n" "-------------------- ---- ------------ ------------ ------------ ------------"
-
   shopt -s nullglob
-  # Optional dataset selection via DATASETS env var (space-separated basenames)
+
   declare -A allow=()
   if [[ -n "${DATASETS:-}" ]]; then
     for d in ${DATASETS}; do
       allow["${d}"]=1
     done
   fi
+
+  local results=()
+  local count=0
+  local total=0
+
+  for f in "${SAMPLES_DIR}"/*.bin; do
+    size=$(stat -c%s "$f")
+    [[ "${size}" -ge "${MIN_SAMPLES}" ]] && total=$((total + 1))
+  done
 
   for f in "${SAMPLES_DIR}"/*.bin; do
     if [[ ${#allow[@]} -gt 0 ]]; then
@@ -191,10 +250,14 @@ main() {
     fi
 
     size=$(stat -c%s "$f")
-    if [[ "${size}" -lt "${MIN_SAMPLES}" ]]; then
-      log "Skipping ${f} (size ${size} < ${MIN_SAMPLES})"
+    if (( size < MIN_SAMPLES )); then
+      log "Skipping $(basename "$f") (too small)"
       continue
     fi
+
+    ((count++)) || true
+    log "[${count}/${total}] Processing: $(basename "$f")"
+
     bits=8
     case "$f" in
       *biased-random-bits*|*truerand_1bit*) bits=1 ;;
@@ -203,8 +266,29 @@ main() {
       *8bit*) bits=8 ;;
       *biased-random-bytes*) bits=8 ;;
     esac
-    run_for_file "$f" "$bits"
+
+    read -r ref_iid go_iid ref_non_iid go_non_iid < <(run_for_file "$f" "$bits")
+
+    # Use floating-point tolerant comparison instead of exact string match
+    iid_ok="OK"
+    noniid_ok="OK"
+    compare_entropy "$ref_iid" "$go_iid" || iid_ok="FAIL"
+    if [[ "${SKIP_NONIID:-0}" -ne 1 ]]; then
+      compare_entropy "$ref_non_iid" "$go_non_iid" || noniid_ok="FAIL"
+    else
+      noniid_ok="SKIP"
+    fi
+
+    results+=("$(basename "$f") $bits $ref_iid $go_iid $ref_non_iid $go_non_iid $iid_ok $noniid_ok")
   done
+
+  {
+    echo "Dataset Bits Ref_IID Go_IID Ref_NonIID Go_NonIID IID_OK NonIID_OK"
+    echo "-------------------- ---- ------------ ------------ ------------ ------------ -------- ----------"
+    for line in "${results[@]}"; do
+      echo "$line"
+    done
+  } | column -t
 }
 
 main "$@"

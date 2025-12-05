@@ -24,11 +24,12 @@ func calculateIIDEntropy(data []byte, bitsPerSymbol int, verbose int) (*Result, 
 	cData := (*C.uint8_t)(unsafe.Pointer(&data[0]))
 	cLength := C.size_t(len(data))
 	cBitsPerSymbol := C.int(bitsPerSymbol)
-	cIsBinary := C.bool(bitsPerSymbol == 1)
+	// Always use initial_entropy=true for IID tests (not conditioned mode)
+	cInitialEntropy := C.bool(true)
 	cVerbose := C.int(verbose)
 
 	// Call C function
-	cResult := C.calculate_iid_entropy(cData, cLength, cBitsPerSymbol, cIsBinary, cVerbose)
+	cResult := C.calculate_iid_entropy(cData, cLength, cBitsPerSymbol, cInitialEntropy, cVerbose)
 	if cResult == nil {
 		return nil, newError("calculateIIDEntropy", ErrMemoryAllocation, "failed to allocate result structure")
 	}
@@ -63,11 +64,13 @@ func calculateNonIIDEntropy(data []byte, bitsPerSymbol int, verbose int) (*Resul
 	cData := (*C.uint8_t)(unsafe.Pointer(&data[0]))
 	cLength := C.size_t(len(data))
 	cBitsPerSymbol := C.int(bitsPerSymbol)
-	cIsBinary := C.bool(bitsPerSymbol == 1)
+	// Always use initial_entropy=true for Non-IID tests (not conditioned mode)
+	// This matches the NIST CLI default behavior with -i flag
+	cInitialEntropy := C.bool(true)
 	cVerbose := C.int(verbose)
 
 	// Call C function
-	cResult := C.calculate_non_iid_entropy(cData, cLength, cBitsPerSymbol, cIsBinary, cVerbose)
+	cResult := C.calculate_non_iid_entropy(cData, cLength, cBitsPerSymbol, cInitialEntropy, cVerbose)
 	if cResult == nil {
 		return nil, newError("calculateNonIIDEntropy", ErrMemoryAllocation, "failed to allocate result structure")
 	}

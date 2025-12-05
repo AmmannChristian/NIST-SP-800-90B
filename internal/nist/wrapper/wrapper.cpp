@@ -56,29 +56,29 @@ static bool prepare_data(data_t* dp, const uint8_t* data, size_t length, int bit
     dp->alph_size = 0;
     dp->maxsymbol = 0;
     dp->blen = 0;
-    
+
     // Allocate memory for symbols
     dp->symbols = (uint8_t*)malloc(sizeof(uint8_t) * dp->len);
     dp->rawsymbols = (uint8_t*)malloc(sizeof(uint8_t) * dp->len);
-    
+
     if (!dp->symbols || !dp->rawsymbols) {
         set_error(result, -1, "Failed to allocate memory for symbols");
         if (dp->symbols) free(dp->symbols);
         if (dp->rawsymbols) free(dp->rawsymbols);
         return false;
     }
-    
+
     // Copy data
     memcpy(dp->symbols, data, dp->len);
     memcpy(dp->rawsymbols, data, dp->len);
-    
+
     // Auto-detect word size if needed
     if (dp->word_size == 0) {
         uint8_t datamask = 0;
         for (long i = 0; i < dp->len; i++) {
             datamask |= dp->symbols[i];
         }
-        
+
         uint8_t curbit = 0x80;
         int detected_size = 8;
         for (int i = 8; i > 0 && (datamask & curbit) == 0; i--) {
@@ -87,18 +87,18 @@ static bool prepare_data(data_t* dp, const uint8_t* data, size_t length, int bit
         }
         dp->word_size = (detected_size == -1) ? 1 : detected_size + 1;
     }
-    
+
     // Validate symbol width
     int max_symbols = 1 << dp->word_size;
     int mask = max_symbols - 1;
-    
+
     // Process symbols and build alphabet
     int symbol_map_down_table[max_symbols];
     memset(symbol_map_down_table, 0, max_symbols * sizeof(int));
-    
+
     dp->alph_size = 0;
     dp->maxsymbol = 0;
-    
+
     for (long i = 0; i < dp->len; i++) {
         dp->symbols[i] &= mask;
         if (dp->symbols[i] > dp->maxsymbol) {
@@ -108,15 +108,16 @@ static bool prepare_data(data_t* dp, const uint8_t* data, size_t length, int bit
             symbol_map_down_table[dp->symbols[i]] = 1;
         }
     }
-    
+
     // Create symbol mapping
     for (int i = 0; i < max_symbols; i++) {
         if (symbol_map_down_table[i] != 0) {
             symbol_map_down_table[i] = dp->alph_size++;
         }
     }
-    
-    // Create bitstring
+
+    // Create bitstring from rawsymbols (not mapped symbols)
+    // See NIST Issue #71: https://github.com/usnistgov/SP800-90B_EntropyAssessment/issues/71
     dp->blen = dp->len * dp->word_size;
     if (dp->word_size == 1) {
         dp->bsymbols = dp->symbols;
@@ -128,22 +129,24 @@ static bool prepare_data(data_t* dp, const uint8_t* data, size_t length, int bit
             free(dp->rawsymbols);
             return false;
         }
-        
+
+        // Build bitstring from rawsymbols, not from mapped symbols
         for (long i = 0; i < dp->len; i++) {
+            uint8_t raw = dp->rawsymbols[i] & mask;
             for (int j = 0; j < dp->word_size; j++) {
-                dp->bsymbols[i * dp->word_size + j] = 
-                    (dp->symbols[i] >> (dp->word_size - 1 - j)) & 0x1;
+                dp->bsymbols[i * dp->word_size + j] =
+                    (raw >> (dp->word_size - 1 - j)) & 0x1;
             }
         }
     }
-    
+
     // Map down symbols
     if (dp->alph_size < dp->maxsymbol + 1) {
         for (long i = 0; i < dp->len; i++) {
             dp->symbols[i] = (uint8_t)symbol_map_down_table[dp->symbols[i]];
         }
     }
-    
+
     return true;
 }
 
@@ -158,62 +161,62 @@ EntropyResult* calculate_iid_entropy(
     if (!result) {
         return NULL;
     }
-    
+
     try {
         // Validate input
         if (!data || length == 0) {
             set_error(result, -1, "Invalid input: data is NULL or empty");
             return result;
         }
-        
+
         if (bits_per_symbol < 0 || bits_per_symbol > 8) {
             set_error(result, -1, "Invalid bits_per_symbol: must be 0-8");
             return result;
         }
-        
+
         // Prepare data structure
         data_t dp;
         if (!prepare_data(&dp, data, length, bits_per_symbol, result)) {
             return result;
         }
-        
+
         // Check alphabet size
         if (dp.alph_size <= 1) {
             set_error(result, -1, "Symbol alphabet consists of 1 symbol. No entropy awarded.");
             free_data(&dp);
             return result;
         }
-        
+
         // Calculate entropy estimates
         double H_original = dp.word_size;
         double H_bitstring = 1.0;
-        
+
         // Most Common Value estimate
         H_original = most_common(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
-        
+
         if (dp.alph_size > 2) {
             H_bitstring = most_common(dp.bsymbols, dp.blen, 2, verbose, "Bitstring");
         }
-        
+
         // Chi-square tests
         bool chi_square_pass = chi_square_tests(dp.symbols, dp.len, dp.alph_size, verbose);
-        
+
         // LRS test
         bool lrs_pass = len_LRS_test(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
-        
+
         // Permutation tests
         double rawmean, median;
         calc_stats(&dp, rawmean, median);
         IidTestCase tc;
         bool perm_pass = permutation_tests(&dp, rawmean, median, verbose, tc);
-        
+
         // Calculate assessed entropy
         double h_assessed = dp.word_size;
         if (dp.alph_size > 2) {
             h_assessed = std::min(h_assessed, H_bitstring * dp.word_size);
         }
         h_assessed = std::min(h_assessed, H_original);
-        
+
         // Set results
         result->h_original = H_original;
         result->h_bitstring = H_bitstring;
@@ -221,16 +224,16 @@ EntropyResult* calculate_iid_entropy(
         result->min_entropy = h_assessed;
         result->data_word_size = dp.word_size;
         result->error_code = 0;
-        
+
         // Clean up
         free_data(&dp);
-        
+
     } catch (const std::exception& e) {
         set_error(result, -2, e.what());
     } catch (...) {
         set_error(result, -2, "Unknown exception occurred");
     }
-    
+
     return result;
 }
 
@@ -245,85 +248,90 @@ EntropyResult* calculate_non_iid_entropy(
     if (!result) {
         return NULL;
     }
-    
+
     try {
         // Validate input
         if (!data || length == 0) {
             set_error(result, -1, "Invalid input: data is NULL or empty");
             return result;
         }
-        
+
         if (bits_per_symbol < 0 || bits_per_symbol > 8) {
             set_error(result, -1, "Invalid bits_per_symbol: must be 0-8");
             return result;
         }
-        
+
         // Prepare data structure
         data_t dp;
         if (!prepare_data(&dp, data, length, bits_per_symbol, result)) {
             return result;
         }
-        
+
         // Check alphabet size
         if (dp.alph_size <= 1) {
             set_error(result, -1, "Symbol alphabet consists of 1 symbol. No entropy awarded.");
             free_data(&dp);
             return result;
         }
-        
+
         // Initialize entropy estimates
         double H_original = dp.word_size;
         double H_bitstring = 1.0;
         double ret_min_entropy;
-        
+
         // Section 6.3.1 - Most Common Value
-        if (dp.alph_size > 2 || !is_binary) {
+        // Note: is_binary parameter represents initial_entropy mode (not whether data is binary)
+        bool initial_entropy = is_binary;
+
+        if ((dp.alph_size > 2) || !initial_entropy) {
             ret_min_entropy = most_common(dp.bsymbols, dp.blen, 2, verbose, "Bitstring");
             H_bitstring = std::min(ret_min_entropy, H_bitstring);
         }
-        ret_min_entropy = most_common(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
-        H_original = std::min(ret_min_entropy, H_original);
-        
+        if (initial_entropy) {
+            ret_min_entropy = most_common(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
+            H_original = std::min(ret_min_entropy, H_original);
+        }
+
         // Section 6.3.2 - Collision Test (bit strings only)
-        if (dp.alph_size > 2 || !is_binary) {
+        if ((dp.alph_size > 2) || !initial_entropy) {
             ret_min_entropy = collision_test(dp.bsymbols, dp.blen, verbose, "Bitstring");
             H_bitstring = std::min(ret_min_entropy, H_bitstring);
         }
-        if (is_binary && dp.alph_size == 2) {
+        if (initial_entropy && (dp.alph_size == 2)) {
             ret_min_entropy = collision_test(dp.symbols, dp.len, verbose, "Literal");
             H_original = std::min(ret_min_entropy, H_original);
         }
-        
+
         // Section 6.3.3 - Markov Test (bit strings only)
-        if (dp.alph_size > 2 || !is_binary) {
+        if ((dp.alph_size > 2) || !initial_entropy) {
             ret_min_entropy = markov_test(dp.bsymbols, dp.blen, verbose, "Bitstring");
             H_bitstring = std::min(ret_min_entropy, H_bitstring);
         }
-        if (is_binary && dp.alph_size == 2) {
+        if (initial_entropy && (dp.alph_size == 2)) {
             ret_min_entropy = markov_test(dp.symbols, dp.len, verbose, "Literal");
             H_original = std::min(ret_min_entropy, H_original);
         }
-        
+
         // Section 6.3.4 - Compression Test (bit strings only)
-        if (dp.alph_size > 2 || !is_binary) {
+        if ((dp.alph_size > 2) || !initial_entropy) {
             ret_min_entropy = compression_test(dp.bsymbols, dp.blen, verbose, "Bitstring");
             if (ret_min_entropy >= 0) {
                 H_bitstring = std::min(ret_min_entropy, H_bitstring);
             }
         }
-        if (is_binary && dp.alph_size == 2) {
+        if (initial_entropy && (dp.alph_size == 2)) {
             ret_min_entropy = compression_test(dp.symbols, dp.len, verbose, "Literal");
             if (ret_min_entropy >= 0) {
                 H_original = std::min(ret_min_entropy, H_original);
             }
         }
-        
+
         // Section 6.3.5 - t-Tuple Test
         // Section 6.3.6 - LRS Test
         double bin_t_tuple_res = -1.0, bin_lrs_res = -1.0;
         double t_tuple_res = -1.0, lrs_res = -1.0;
-        
-        if (dp.alph_size > 2 || !is_binary) {
+
+        if ((dp.alph_size > 2) || !initial_entropy) {
             SAalgs(dp.bsymbols, dp.blen, 2, bin_t_tuple_res, bin_lrs_res, verbose, "Bitstring");
             if (bin_t_tuple_res >= 0.0) {
                 H_bitstring = std::min(bin_t_tuple_res, H_bitstring);
@@ -332,70 +340,83 @@ EntropyResult* calculate_non_iid_entropy(
                 H_bitstring = std::min(bin_lrs_res, H_bitstring);
             }
         }
-        
-        SAalgs(dp.symbols, dp.len, dp.alph_size, t_tuple_res, lrs_res, verbose, "Literal");
-        if (t_tuple_res >= 0.0) {
-            H_original = std::min(t_tuple_res, H_original);
+
+        if (initial_entropy) {
+            SAalgs(dp.symbols, dp.len, dp.alph_size, t_tuple_res, lrs_res, verbose, "Literal");
+            if (t_tuple_res >= 0.0) {
+                H_original = std::min(t_tuple_res, H_original);
+            }
+            if (lrs_res >= 0.0) {
+                H_original = std::min(lrs_res, H_original);
+            }
         }
-        if (lrs_res >= 0.0) {
-            H_original = std::min(lrs_res, H_original);
-        }
-        
+
         // Section 6.3.7 - MultiMCW Test
-        if (dp.alph_size > 2 || !is_binary) {
+        if ((dp.alph_size > 2) || !initial_entropy) {
             ret_min_entropy = multi_mcw_test(dp.bsymbols, dp.blen, 2, verbose, "Bitstring");
             if (ret_min_entropy >= 0) {
                 H_bitstring = std::min(ret_min_entropy, H_bitstring);
             }
         }
-        ret_min_entropy = multi_mcw_test(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
-        if (ret_min_entropy >= 0) {
-            H_original = std::min(ret_min_entropy, H_original);
+        if (initial_entropy) {
+            ret_min_entropy = multi_mcw_test(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
+            if (ret_min_entropy >= 0) {
+                H_original = std::min(ret_min_entropy, H_original);
+            }
         }
-        
+
         // Section 6.3.8 - Lag Prediction Test
-        if (dp.alph_size > 2 || !is_binary) {
+        if ((dp.alph_size > 2) || !initial_entropy) {
             ret_min_entropy = lag_test(dp.bsymbols, dp.blen, 2, verbose, "Bitstring");
             if (ret_min_entropy >= 0) {
                 H_bitstring = std::min(ret_min_entropy, H_bitstring);
             }
         }
-        ret_min_entropy = lag_test(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
-        if (ret_min_entropy >= 0) {
-            H_original = std::min(ret_min_entropy, H_original);
+        if (initial_entropy) {
+            ret_min_entropy = lag_test(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
+            if (ret_min_entropy >= 0) {
+                H_original = std::min(ret_min_entropy, H_original);
+            }
         }
-        
+
         // Section 6.3.9 - MultiMMC Test
-        if (dp.alph_size > 2 || !is_binary) {
+        if ((dp.alph_size > 2) || !initial_entropy) {
             ret_min_entropy = multi_mmc_test(dp.bsymbols, dp.blen, 2, verbose, "Bitstring");
             if (ret_min_entropy >= 0) {
                 H_bitstring = std::min(ret_min_entropy, H_bitstring);
             }
         }
-        ret_min_entropy = multi_mmc_test(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
-        if (ret_min_entropy >= 0) {
-            H_original = std::min(ret_min_entropy, H_original);
+        if (initial_entropy) {
+            ret_min_entropy = multi_mmc_test(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
+            if (ret_min_entropy >= 0) {
+                H_original = std::min(ret_min_entropy, H_original);
+            }
         }
-        
+
         // Section 6.3.10 - LZ78Y Test
-        if (dp.alph_size > 2 || !is_binary) {
+        if ((dp.alph_size > 2) || !initial_entropy) {
             ret_min_entropy = LZ78Y_test(dp.bsymbols, dp.blen, 2, verbose, "Bitstring");
             if (ret_min_entropy >= 0) {
                 H_bitstring = std::min(ret_min_entropy, H_bitstring);
             }
         }
-        ret_min_entropy = LZ78Y_test(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
-        if (ret_min_entropy >= 0) {
-            H_original = std::min(ret_min_entropy, H_original);
+        if (initial_entropy) {
+            ret_min_entropy = LZ78Y_test(dp.symbols, dp.len, dp.alph_size, verbose, "Literal");
+            if (ret_min_entropy >= 0) {
+                H_original = std::min(ret_min_entropy, H_original);
+            }
         }
-        
+
         // Calculate assessed entropy
+        // Following NIST SP800-90B Section 3.1.3 (non_iid_main.cpp lines 491-496)
         double h_assessed = dp.word_size;
-        if (dp.alph_size > 2 || !is_binary) {
+        if ((dp.alph_size > 2) || !initial_entropy) {
             h_assessed = std::min(h_assessed, H_bitstring * dp.word_size);
         }
-        h_assessed = std::min(h_assessed, H_original);
-        
+        if (initial_entropy) {
+            h_assessed = std::min(h_assessed, H_original);
+        }
+
         // Set results
         result->h_original = H_original;
         result->h_bitstring = H_bitstring;
@@ -403,16 +424,16 @@ EntropyResult* calculate_non_iid_entropy(
         result->min_entropy = h_assessed;
         result->data_word_size = dp.word_size;
         result->error_code = 0;
-        
+
         // Clean up
         free_data(&dp);
-        
+
     } catch (const std::exception& e) {
         set_error(result, -2, e.what());
     } catch (...) {
         set_error(result, -2, "Unknown exception occurred");
     }
-    
+
     return result;
 }
 
