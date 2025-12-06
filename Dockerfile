@@ -40,6 +40,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libdivsufsort3 \
     libjsoncpp25 \
     libmpfr6 \
+    libgomp1 \
     libgmp10 \
     libssl3 \
     ca-certificates \
