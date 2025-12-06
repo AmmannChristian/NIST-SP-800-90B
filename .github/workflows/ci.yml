@@ -292,7 +292,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/sp800-90b-entropy
+          images: ghcr.io/${{ github.repository_owner }}/nist-sp800-90b
           tags: |
             type=sha,format=long
             type=raw,value=latest

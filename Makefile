@@ -5,7 +5,7 @@
 # ========================================
 # Variables
 # ========================================
-BINARY_NAME=sp800-90b-entropy
+BINARY_NAME=nist-sp800-90b
 BUILD_DIR=build
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 PROTO_DIR=api/nist/v1
