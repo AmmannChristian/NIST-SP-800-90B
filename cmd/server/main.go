@@ -18,6 +18,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/AmmannChristian/nist-800-90b/internal/config"
@@ -90,6 +92,9 @@ func run() error {
 		grpcServer = grpc.NewServer(serverOpts...)
 
 		pb.RegisterEntropyServiceServer(grpcServer, service.NewGRPCServer(service.NewService()))
+		healthServer := health.NewServer()
+		healthpb.RegisterHealthServer(grpcServer, healthServer)
+		healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 		reflection.Register(grpcServer)
 
 		go func() {
@@ -181,7 +186,13 @@ func buildUnaryInterceptors(cfg *config.Config) ([]grpc.UnaryServerInterceptor, 
 		Str("jwks_url", cfg.AuthJWKSURL).
 		Msg("gRPC authentication enabled")
 
-	return append(interceptors, grpcserver.UnaryServerInterceptor(validator)), nil
+	return append(interceptors, grpcserver.UnaryServerInterceptor(
+		validator,
+		grpcserver.WithExemptMethods(
+			"/grpc.health.v1.Health/Check",
+			"/grpc.health.v1.Health/Watch",
+		),
+	)), nil
 }
 
 func buildGRPCServerOptions(cfg *config.Config, unaryInterceptors []grpc.UnaryServerInterceptor) ([]grpc.ServerOption, error) {
