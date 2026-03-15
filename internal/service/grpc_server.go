@@ -134,7 +134,7 @@ func (s *GRPCServer) AssessEntropy(ctx context.Context, req *pb.Sp80090BAssessme
 		MinEntropy:        minEntropy,
 		IidResults:        iidResults,
 		NonIidResults:     nonIIDResults,
-		Passed:            true,
+		Passed:            derivePassedFromEstimators(iidResults, nonIIDResults),
 		AssessmentSummary: "NIST SP 800-90B entropy assessment completed",
 		SampleCount:       uint64(len(req.Data)),
 		BitsPerSymbol:     usedBits,
@@ -149,6 +149,23 @@ func (s *GRPCServer) AssessEntropy(ctx context.Context, req *pb.Sp80090BAssessme
 		Msg("AssessEntropy completed successfully")
 
 	return response, nil
+}
+
+// derivePassedFromEstimators computes the top-level Passed flag by ANDing
+// all individual estimator Passed fields across IID and Non-IID results.
+// SP 800-90B does not define a top-level pass/fail — this is product-defined.
+func derivePassedFromEstimators(iidResults, nonIIDResults []*pb.Sp80090BEstimatorResult) bool {
+	for _, r := range iidResults {
+		if !r.Passed {
+			return false
+		}
+	}
+	for _, r := range nonIIDResults {
+		if !r.Passed {
+			return false
+		}
+	}
+	return true
 }
 
 // convertEstimatorsToProto maps internal EstimatorResult values to their
